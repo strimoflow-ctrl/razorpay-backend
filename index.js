@@ -14,30 +14,56 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
+// ✅ Root route
 app.get("/", (req, res) => {
   res.send("Razorpay Server is Running!");
+});
+
+// ✅ Health/Ping endpoint — UptimeRobot इसे ping करेगा
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "Server is alive",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // 1. आर्डर क्रिएट करें
 app.post("/create-order", async (req, res) => {
   try {
+    const { amount } = req.body;
+
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Invalid amount" });
+    }
+
     const options = {
-      amount: req.body.amount * 100, // राशि पैसे में
+      amount: Math.round(amount * 100), // राशि पैसे में (integer होना चाहिए)
       currency: "INR",
       receipt: "order_" + Date.now(),
     };
+
     const order = await razorpay.orders.create(options);
     res.json(order);
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Error creating order");
+    console.error("Order creation error:", error);
+    res.status(500).json({ error: "Error creating order" });
   }
 });
 
 // 2. पेमेंट वेरीफाई करें
 app.post("/verify-payment", (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return res.status(400).json({ status: "failure", error: "Missing payment details" });
+  }
+
   const secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!secret) {
+    return res.status(500).json({ status: "failure", error: "Server config error" });
+  }
 
   const generated_signature = crypto
     .createHmac("sha256", secret)
@@ -47,7 +73,7 @@ app.post("/verify-payment", (req, res) => {
   if (generated_signature === razorpay_signature) {
     res.json({ status: "success" });
   } else {
-    res.status(400).json({ status: "failure" });
+    res.status(400).json({ status: "failure", error: "Invalid signature" });
   }
 });
 
